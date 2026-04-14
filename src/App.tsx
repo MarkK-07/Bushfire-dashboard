@@ -51,12 +51,14 @@ async function getCoordinates(query: string): Promise<Coordinates> {
   }
 }
 
-async function getCurrentConditions(name: string): Promise<CurrentConditions | null> {
+async function getCurrentConditions(lat: number, lon: number): Promise<CurrentConditions | null> {
   try {
-    const response = await fetch(
-      `https://wttr.in/${encodeURIComponent(name)}?format=j1`
-    )
+    const url = `https://wttr.in/${lat},${lon}?format=j1`
+    console.log('Fetching BOM data from:', url)
+    const response = await fetch(url)
+    console.log('Response status:', response.status)
     const data = await response.json()
+    console.log('wttr.in data:', data)
     const current = data.current_condition[0]
     return {
       temperature: parseFloat(current.temp_C),
@@ -64,22 +66,32 @@ async function getCurrentConditions(name: string): Promise<CurrentConditions | n
       windSpeed: parseFloat(current.windspeedKmph),
       precipitation: parseFloat(current.precipMM)
     }
-  } catch {
+  } catch (error) {
+    console.log('wttr.in failed with error:', error)
     return null
   }
 }
 
-function calculateDroughtFactor(dailyRainfall: number[]): number {
+function calculateDroughtFactor(
+  dailyRainfall: number[],
+  currentHumidity: number
+): number {
   const weights = dailyRainfall.map((_, i) => Math.exp(-0.1 * i))
   const weightedRain = dailyRainfall.reduce(
     (sum, rain, i) => sum + rain * weights[i], 0
   )
   const maxPossible = weights.reduce((sum, w) => sum + w * 10, 0)
   const wetness = Math.min(weightedRain / maxPossible, 1)
-  return parseFloat((10 * (1 - wetness)).toFixed(1))
+  const rawDrought = 10 * (1 - wetness)
+
+  const humidityCapFactor = Math.max(0, (100 - currentHumidity) / 100)
+  const maxDroughtFromHumidity = 10 * humidityCapFactor
+  const corrected = Math.min(rawDrought, maxDroughtFromHumidity)
+
+  return parseFloat(corrected.toFixed(1))
 }
 
-async function getPeakConditions(lat: number, lon: number): Promise<PeakConditions> {
+async function getPeakConditions(lat: number, lon: number, currentHumidity: number): Promise<PeakConditions> {
   const today = new Date()
   const endDate = today.toISOString().split('T')[0]
   const startDate = new Date(today)
@@ -102,7 +114,7 @@ async function getPeakConditions(lat: number, lon: number): Promise<PeakConditio
     .reverse()
     .map((v: number) => v ?? 0)
 
-  const droughtFactor = calculateDroughtFactor(dailyRainfall)
+  const droughtFactor = calculateDroughtFactor(dailyRainfall, currentHumidity)
 
   return {
     maxTemperature: forecastData.daily.temperature_2m_max[0],
@@ -114,10 +126,8 @@ async function getPeakConditions(lat: number, lon: number): Promise<PeakConditio
 }
 
 async function getWeatherData(coords: Coordinates): Promise<WeatherData> {
-  const [current, peak] = await Promise.all([
-    getCurrentConditions(coords.name),
-    getPeakConditions(coords.lat, coords.lon)
-  ])
+  const current = await getCurrentConditions(coords.lat, coords.lon)
+const peak = await getPeakConditions(coords.lat, coords.lon, current?.humidity ?? 50)
 
   const fallbackCurrent: CurrentConditions = {
     temperature: peak.maxTemperature,
