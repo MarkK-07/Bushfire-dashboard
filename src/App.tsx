@@ -132,6 +132,32 @@ async function getWeatherData(coords: Coordinates): Promise<WeatherData> {
     droughtFactor: peak.droughtFactor
   }
 }
+function calculateFFDI(
+  drought: number,
+  humidity: number,
+  temperature: number,
+  windSpeed: number
+): number {
+  const ffdi =
+    2 *
+    Math.exp(
+      -0.45 +
+      0.987 * Math.log(drought) -
+      0.0345 * humidity +
+      0.0338 * temperature +
+      0.0234 * windSpeed
+    )
+  return parseFloat(ffdi.toFixed(1))
+}
+
+function getRiskRating(ffdi: number): { rating: string; color: string } {
+  if (ffdi < 12) return { rating: 'Low-Moderate', color: 'green' }
+  if (ffdi < 25) return { rating: 'High', color: 'orange' }
+  if (ffdi < 50) return { rating: 'Very High', color: 'darkorange' }
+  if (ffdi < 75) return { rating: 'Severe', color: 'red' }
+  if (ffdi < 100) return { rating: 'Extreme', color: 'darkred' }
+  return { rating: 'Catastrophic', color: 'purple' }
+}
 
 function App() {
   const [suburb, setSuburb] = useState('')
@@ -163,17 +189,36 @@ function App() {
 
       {!loading && weather && (
         <div>
-          <h2>Current Conditions (BOM Observed)</h2>
-          <p>Temperature: {weather.current.temperature}°C</p>
-          <p>Humidity: {weather.current.humidity}%</p>
-          <p>Wind Speed: {weather.current.windSpeed} km/h</p>
-          <p>Precipitation: {weather.current.precipitation}mm</p>
+          {(() => {
+            const ffdi = calculateFFDI(
+              weather.droughtFactor,
+              weather.peak.maxHumidity,
+              weather.peak.maxTemperature,
+              weather.peak.maxWindSpeed
+            )
+            const { rating, color } = getRiskRating(ffdi)
+            return (
+              <div>
+                <h2>Fire Danger Rating</h2>
+                <p style={{ color, fontSize: '2rem', fontWeight: 'bold' }}>
+                  {rating}
+                </p>
+                <p>FFDI Score: {ffdi}</p>
 
-          <h2>Today's Peak Forecast (FFDI Inputs)</h2>
-          <p>Max Temperature: {weather.peak.maxTemperature}°C</p>
-          <p>Max Humidity: {weather.peak.maxHumidity}%</p>
-          <p>Max Wind Speed: {weather.peak.maxWindSpeed} km/h</p>
-          <p>Drought Factor: {weather.droughtFactor} / 10</p>
+                <h2>Current Conditions (BOM Observed)</h2>
+                <p>Temperature: {weather.current.temperature}°C</p>
+                <p>Humidity: {weather.current.humidity}%</p>
+                <p>Wind Speed: {weather.current.windSpeed} km/h</p>
+                <p>Precipitation: {weather.current.precipitation}mm</p>
+
+                <h2>Today's Peak Forecast (FFDI Inputs)</h2>
+                <p>Max Temperature: {weather.peak.maxTemperature}°C</p>
+                <p>Max Humidity: {weather.peak.maxHumidity}%</p>
+                <p>Max Wind Speed: {weather.peak.maxWindSpeed} km/h</p>
+                <p>Drought Factor: {weather.droughtFactor} / 10</p>
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>
