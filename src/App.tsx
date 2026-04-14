@@ -11,6 +11,7 @@ interface WeatherData {
   humidity: number
   windSpeed: number
   precipitation: number
+  source: string
 }
 
 function isPostcode(query: string): boolean {
@@ -38,7 +39,7 @@ async function getCoordinates(query: string): Promise<Coordinates> {
   }
 }
 
-async function getWeather(lat: number, lon: number): Promise<WeatherData> {
+async function getOpenMeteoWeather(lat: number, lon: number): Promise<Omit<WeatherData, 'source'>> {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,relative_humidity_2m_max,wind_speed_10m_max,precipitation_sum&forecast_days=1&timezone=Australia/Sydney`
   const response = await fetch(url)
   const data = await response.json()
@@ -50,6 +51,41 @@ async function getWeather(lat: number, lon: number): Promise<WeatherData> {
   }
 }
 
+async function getBOMWeather(name: string): Promise<Partial<Omit<WeatherData, 'source'>> | null> {
+  try {
+    const response = await fetch(`https://wttr.in/${encodeURIComponent(name)}?format=j1`)
+    const data = await response.json()
+    const current = data.current_condition[0]
+    return {
+      temperature: parseFloat(current.temp_C),
+      humidity: parseFloat(current.humidity),
+      windSpeed: parseFloat(current.windspeedKmph),
+      precipitation: parseFloat(current.precipMM)
+    }
+  } catch {
+    return null
+  }
+}
+
+async function getWeather(lat: number, lon: number, name: string): Promise<WeatherData> {
+  const [openMeteo, bom] = await Promise.all([
+    getOpenMeteoWeather(lat, lon),
+    getBOMWeather(name)
+  ])
+
+  if (!bom) {
+    return { ...openMeteo, source: 'Open-Meteo forecast (BOM unavailable)' }
+  }
+
+  return {
+    temperature: bom.temperature ?? openMeteo.temperature,
+    humidity: bom.humidity ?? openMeteo.humidity,
+    windSpeed: bom.windSpeed ?? openMeteo.windSpeed,
+    precipitation: bom.precipitation ?? openMeteo.precipitation,
+    source: 'BOM observed (via wttr.in)'
+  }
+}
+
 function App() {
   const [suburb, setSuburb] = useState('')
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null)
@@ -58,7 +94,7 @@ function App() {
   async function handleSearch() {
     const coords = await getCoordinates(suburb)
     setCoordinates(coords)
-    const weatherData = await getWeather(coords.lat, coords.lon)
+    const weatherData = await getWeather(coords.lat, coords.lon, coords.name)
     setWeather(weatherData)
   }
 
@@ -79,6 +115,7 @@ function App() {
       )}
       {weather && (
         <div>
+          <p>Source: {weather.source}</p>
           <p>Temperature: {weather.temperature}°C</p>
           <p>Humidity: {weather.humidity}%</p>
           <p>Wind Speed: {weather.windSpeed} km/h</p>
